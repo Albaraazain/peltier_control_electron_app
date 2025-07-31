@@ -41,12 +41,12 @@ class TemperatureControlService extends EventEmitter {
   setEnabled(enabled) {
     this.isEnabled = enabled;
     
-    if (!enabled && this.activeController) {
+    if (!enabled && this.controller) {
       // Reset controller when disabling
-      this.activeController.reset();
+      this.controller.reset();
     }
     
-    console.log(`🔧 Temperature control ${enabled ? 'enabled' : 'disabled'}`);
+    console.log(`🔧 Neural ML temperature control ${enabled ? 'enabled' : 'disabled'}`);
     this.emit('controlStateChanged', { enabled });
     
     return true;
@@ -56,14 +56,14 @@ class TemperatureControlService extends EventEmitter {
    * Process temperature update and return control actions
    */
   processTemperature(temperature) {
-    if (!this.isEnabled || !this.activeController) {
+    if (!this.isEnabled || !this.controller) {
       return null;
     }
     
     const startTime = Date.now();
     
-    // Get control decision from active controller
-    const controlResult = this.activeController.update(temperature);
+    // Get control decision from neural controller
+    const controlResult = this.controller.update(temperature);
     
     if (!controlResult) {
       return null;
@@ -72,7 +72,7 @@ class TemperatureControlService extends EventEmitter {
     // Track performance
     const processingTime = Date.now() - startTime;
     this.trackPerformance({
-      controller: this.activeControllerType,
+      controller: 'neural',
       temperature,
       error: controlResult.error,
       peltier1: controlResult.peltier1,
@@ -85,14 +85,14 @@ class TemperatureControlService extends EventEmitter {
     
     // Emit control decision
     this.emit('controlDecision', {
-      controller: this.activeControllerType,
+      controller: 'neural',
       temperature,
       setpoint: controlResult.setpoint,
       peltier1: controlResult.peltier1,
       peltier2: controlResult.peltier2,
       error: controlResult.error,
       stable: controlResult.stable,
-      metrics: this.activeController.getMetrics ? this.activeController.getMetrics() : null
+      metrics: this.controller.getMetrics ? this.controller.getMetrics() : null
     });
     
     this.lastUpdate = Date.now();
@@ -100,7 +100,7 @@ class TemperatureControlService extends EventEmitter {
     return {
       peltier1: controlResult.peltier1,
       peltier2: controlResult.peltier2,
-      controller: this.activeControllerType,
+      controller: 'neural',
       metrics: controlResult
     };
   }
@@ -109,12 +109,9 @@ class TemperatureControlService extends EventEmitter {
    * Set new temperature setpoint
    */
   setSetpoint(setpoint) {
-    // Update all controllers
-    Object.values(this.controllers).forEach(controller => {
-      if (controller && controller.setSetpoint) {
-        controller.setSetpoint(setpoint);
-      }
-    });
+    if (this.controller && this.controller.setSetpoint) {
+      this.controller.setSetpoint(setpoint);
+    }
     
     console.log(`🎯 Temperature setpoint changed to ${setpoint}°C`);
     this.emit('setpointChanged', { setpoint });
@@ -125,71 +122,43 @@ class TemperatureControlService extends EventEmitter {
    */
   getConfiguration() {
     return {
-      activeController: this.activeControllerType,
+      controller: 'neural',
       enabled: this.isEnabled,
-      controllers: Object.keys(this.controllers),
       lastUpdate: this.lastUpdate
     };
   }
   
   /**
-   * Get controller-specific parameters
+   * Get neural controller parameters
    */
-  getControllerParams(type) {
-    const controller = this.controllers[type];
-    if (!controller) return null;
+  getControllerParams() {
+    if (!this.controller) return null;
     
-    // Extract relevant parameters based on controller type
-    switch (type) {
-      case 'stable':
-      case 'pid':
-        return {
-          kp: controller.kp,
-          ki: controller.ki,
-          kd: controller.kd,
-          setpoint: controller.setpoint
-        };
-      
-      case 'smart':
-        return {
-          kp: controller.kp,
-          ki: controller.ki,
-          kd: controller.kd,
-          setpoint: controller.setpoint,
-          adaptiveGain: controller.adaptiveGain || 1.0
-        };
-      
-      case 'neural':
-        return {
-          setpoint: controller.setpoint,
-          predictionHorizon: controller.predictionHorizon,
-          controlHorizon: controller.controlHorizon,
-          hiddenSize: controller.hiddenSize,
-          learningRate: controller.learningRate,
-          modelConfidence: controller.modelConfidence
-        };
-      
-      default:
-        return null;
-    }
+    return {
+      setpoint: this.controller.setpoint,
+      predictionHorizon: this.controller.predictionHorizon,
+      controlHorizon: this.controller.controlHorizon,
+      hiddenSize: this.controller.hiddenSize,
+      learningRate: this.controller.learningRate,
+      modelConfidence: this.controller.modelConfidence
+    };
   }
   
   /**
-   * Update controller parameters
+   * Update neural controller parameters
    */
-  updateControllerParams(type, params) {
-    const controller = this.controllers[type];
-    if (!controller) return false;
+  updateControllerParams(params) {
+    if (!this.controller) return false;
     
-    // Update parameters based on controller type
+    // Update parameters
     Object.keys(params).forEach(key => {
-      if (controller.hasOwnProperty(key)) {
-        controller[key] = params[key];
+      if (this.controller.hasOwnProperty(key)) {
+        this.controller[key] = params[key];
       }
     });
     
-    console.log(`📝 Updated ${type} controller parameters:`, params);
-    this.emit('controllerParamsUpdated', { type, params });
+    console.log(`📝 Updated neural controller parameters:`, params);
+    this.emit('controllerParamsUpdated', { type: 'neural', params });
     
     return true;
   }
@@ -221,20 +190,6 @@ class TemperatureControlService extends EventEmitter {
     const stableCount = recent.filter(p => p.stable).length;
     const stabilityRate = stableCount / recent.length;
     
-    // Controller-specific stats
-    const byController = {};
-    Object.keys(this.controllers).forEach(type => {
-      const controllerData = this.performanceHistory.filter(p => p.controller === type);
-      if (controllerData.length > 0) {
-        const cErrors = controllerData.map(p => Math.abs(p.error));
-        byController[type] = {
-          avgError: cErrors.reduce((a, b) => a + b, 0) / cErrors.length,
-          samples: controllerData.length,
-          avgProcessingTime: controllerData.reduce((a, b) => a + b.processingTime, 0) / controllerData.length
-        };
-      }
-    });
-    
     return {
       overall: {
         avgError,
@@ -243,9 +198,13 @@ class TemperatureControlService extends EventEmitter {
         stabilityRate,
         totalSamples: this.performanceHistory.length
       },
-      byController,
+      neural: {
+        avgError,
+        samples: this.performanceHistory.length,
+        avgProcessingTime: recent.reduce((a, b) => a + b.processingTime, 0) / recent.length
+      },
       current: {
-        controller: this.activeControllerType,
+        controller: 'neural',
         enabled: this.isEnabled,
         lastUpdate: this.lastUpdate
       }

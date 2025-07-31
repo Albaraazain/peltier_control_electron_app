@@ -51,6 +51,7 @@ const EnhancedTemperatureMonitor = ({ onOpenSettings }) => {
   const [isLoading, setIsLoading] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
   const [tempTrend, setTempTrend] = useState('stable')
+  const [rbfController, setRbfController] = useState({ enabled: false, gains: { kp: 0, ki: 0, kd: 0 }, error: 0 })
   const maxDataPoints = 100
   const targetTemp = 5.0
 
@@ -265,12 +266,24 @@ const EnhancedTemperatureMonitor = ({ onOpenSettings }) => {
       }))
     })
 
+    const unsubscribeControl = window.electronAPI.onControlDecision((_event, data) => {
+      setRbfController({
+        enabled: true,
+        gains: data.gains || { kp: 0, ki: 0, kd: 0 },
+        error: Math.abs(data.error),
+        stable: data.stable,
+        pid: data.pid
+      })
+    })
+
     handleConnect()
+    loadRBFStatus()
 
     return () => {
       unsubscribeTemp?.()
       unsubscribeConnection?.()
       unsubscribePeltier?.()
+      unsubscribeControl?.()
     }
   }, [currentTemp])
 
@@ -318,6 +331,37 @@ const EnhancedTemperatureMonitor = ({ onOpenSettings }) => {
       }
     } catch (error) {
       console.error('Failed to refresh temperature:', error)
+    }
+  }
+
+  const loadRBFStatus = async () => {
+    if (!window.electronAPI) return
+    
+    try {
+      const status = await window.electronAPI.getRBFStatus()
+      if (status.success) {
+        setRbfController(prev => ({
+          ...prev,
+          enabled: status.config.enabled,
+          gains: status.params?.gains || { kp: 0, ki: 0, kd: 0 }
+        }))
+      }
+    } catch (error) {
+      console.error('Failed to load RBF status:', error)
+    }
+  }
+
+  const toggleRBFControl = async () => {
+    if (!window.electronAPI) return
+    
+    try {
+      const newState = !rbfController.enabled
+      const result = await window.electronAPI.setRBFEnabled(newState)
+      if (result.success) {
+        setRbfController(prev => ({ ...prev, enabled: newState }))
+      }
+    } catch (error) {
+      console.error('Failed to toggle RBF control:', error)
     }
   }
 
@@ -461,6 +505,85 @@ const EnhancedTemperatureMonitor = ({ onOpenSettings }) => {
             </Card>
 
             {/* System Status */}
+            {/* RBF Adaptive PID Controller Card */}
+            <Card className="animate-fade-in-up border-2 border-green-200 bg-gradient-to-br from-emerald-50 to-teal-50">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <div className="p-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-white mr-3">
+                    <Activity className="h-5 w-5" />
+                  </div>
+                  RBF Adaptive PID Controller
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-lg bg-white border">
+                  <div className="flex items-center space-x-3">
+                    <div className={`p-2 rounded-lg ${rbfController.enabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                      <Zap className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">Adaptive Control</p>
+                      <p className={`text-sm font-medium ${rbfController.enabled ? 'text-green-600' : 'text-gray-500'}`}>
+                        {rbfController.enabled ? 'Learning & Optimizing' : 'Disabled'}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={rbfController.enabled}
+                    onCheckedChange={toggleRBFControl}
+                  />
+                </div>
+
+                {rbfController.enabled && (
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
+                      <div className="text-sm font-medium text-gray-700 mb-2">Adaptive PID Gains</div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="text-center">
+                          <div className="text-xs text-gray-500">Kp</div>
+                          <div className="font-bold text-emerald-600">{safeToFixed(rbfController.gains?.kp || 0, 2)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-gray-500">Ki</div>
+                          <div className="font-bold text-emerald-600">{safeToFixed(rbfController.gains?.ki || 0, 2)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-gray-500">Kd</div>
+                          <div className="font-bold text-emerald-600">{safeToFixed(rbfController.gains?.kd || 0, 2)}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="text-center p-2 bg-white rounded-lg border">
+                        <div className="text-xs text-gray-500">Control Error</div>
+                        <div className={`font-bold ${rbfController.error < 0.5 ? 'text-green-600' : rbfController.error < 1.0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                          {safeToFixed(rbfController.error, 2)}°C
+                        </div>
+                      </div>
+                      <div className="text-center p-2 bg-white rounded-lg border">
+                        <div className="text-xs text-gray-500">Status</div>
+                        <div className={`font-bold ${rbfController.stable ? 'text-green-600' : 'text-teal-600'}`}>
+                          {rbfController.stable ? 'Stable' : 'Adapting'}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {rbfController.pid && (
+                      <div className="p-2 bg-white rounded-lg border">
+                        <div className="text-xs text-gray-500 mb-1">PID Components</div>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div>P: {safeToFixed(rbfController.pid.P, 1)}</div>
+                          <div>I: {safeToFixed(rbfController.pid.I, 1)}</div>
+                          <div>D: {safeToFixed(rbfController.pid.D, 1)}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <Card className="animate-fade-in-up">
               <CardHeader>
                 <CardTitle>System Status</CardTitle>

@@ -247,6 +247,71 @@ ipcMain.handle('pid:get-settings', async () => {
   }
 });
 
+// RBF Adaptive PID controller handlers
+ipcMain.handle('rbf:get-status', async () => {
+  try {
+    if (!modbusService.controlService) {
+      return { success: false, error: 'Control service not initialized' };
+    }
+    
+    const config = modbusService.controlService.getConfiguration();
+    const params = modbusService.controlService.getControllerParams();
+    const stats = modbusService.controlService.getPerformanceStats();
+    
+    return { 
+      success: true, 
+      config,
+      params,
+      stats
+    };
+  } catch (error) {
+    console.error('Failed to get RBF controller status:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('rbf:set-enabled', async (event, enabled) => {
+  try {
+    if (!modbusService.controlService) {
+      return { success: false, error: 'Control service not initialized' };
+    }
+    
+    modbusService.controlService.setEnabled(enabled);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to set RBF controller state:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('rbf:export-model', async () => {
+  try {
+    if (!modbusService.controlService) {
+      return { success: false, error: 'Control service not initialized' };
+    }
+    
+    const model = modbusService.controlService.exportRBFModel();
+    return { success: true, model };
+  } catch (error) {
+    console.error('Failed to export RBF model:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('rbf:import-model', async (event, model) => {
+  try {
+    if (!modbusService.controlService) {
+      return { success: false, error: 'Control service not initialized' };
+    }
+    
+    const success = modbusService.controlService.importRBFModel(model);
+    return { success };
+  } catch (error) {
+    console.error('Failed to import RBF model:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Forward Modbus events to renderer
 modbusService.on('temperatureUpdate', (data) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -268,6 +333,12 @@ modbusService.on('connectionStatus', (status) => {
 modbusService.on('peltierStatusChange', (status) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('peltier:status-change', status);
+  }
+});
+
+modbusService.on('controlDecision', (data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('controlDecision', data);
   }
 });
 

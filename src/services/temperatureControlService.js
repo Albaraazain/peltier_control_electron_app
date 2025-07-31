@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events');
-const { NeuralMPCController } = require('../utils/NeuralMPCController');
+const { RBFAdaptivePIDController } = require('../utils/RBFAdaptivePIDController');
 
 class TemperatureControlService extends EventEmitter {
   constructor() {
@@ -19,19 +19,22 @@ class TemperatureControlService extends EventEmitter {
   }
   
   /**
-   * Initialize the neural controller
+   * Initialize the RBF Adaptive PID controller
    */
   initializeControllers(config = {}) {
-    // Neural MPC Controller - Machine Learning based
-    this.controller = new NeuralMPCController({
+    // RBF Neural Network-based Adaptive PID Controller
+    this.controller = new RBFAdaptivePIDController({
       setpoint: config.setpoint || 5.0,
-      predictionHorizon: config.predictionHorizon || 10,
-      controlHorizon: config.controlHorizon || 3,
-      hiddenSize: config.hiddenSize || 16,
-      learningRate: config.learningRate || 0.001
+      kp: config.kp || 2.0,
+      ki: config.ki || 0.5,
+      kd: config.kd || 0.3,
+      numCenters: config.numCenters || 5,
+      learningRate: config.learningRate || 0.01,
+      spread: config.spread || 2.0,
+      nonlinearGain: config.nonlinearGain || 1.5
     });
     
-    console.log('✅ Neural ML temperature controller initialized');
+    console.log('✅ RBF Adaptive PID temperature controller initialized');
   }
   
   
@@ -46,7 +49,7 @@ class TemperatureControlService extends EventEmitter {
       this.controller.reset();
     }
     
-    console.log(`🔧 Neural ML temperature control ${enabled ? 'enabled' : 'disabled'}`);
+    console.log(`🔧 RBF Adaptive PID temperature control ${enabled ? 'enabled' : 'disabled'}`);
     this.emit('controlStateChanged', { enabled });
     
     return true;
@@ -72,26 +75,28 @@ class TemperatureControlService extends EventEmitter {
     // Track performance
     const processingTime = Date.now() - startTime;
     this.trackPerformance({
-      controller: 'neural',
+      controller: 'rbf-pid',
       temperature,
       error: controlResult.error,
       peltier1: controlResult.peltier1,
       peltier2: controlResult.peltier2,
       processingTime,
       timestamp: controlResult.timestamp,
-      modelConfidence: controlResult.modelConfidence || null,
-      stable: controlResult.stable
+      stable: controlResult.stable,
+      gains: controlResult.gains
     });
     
     // Emit control decision
     this.emit('controlDecision', {
-      controller: 'neural',
+      controller: 'rbf-pid',
       temperature,
       setpoint: controlResult.setpoint,
       peltier1: controlResult.peltier1,
       peltier2: controlResult.peltier2,
       error: controlResult.error,
       stable: controlResult.stable,
+      gains: controlResult.gains,
+      pid: controlResult.pid,
       metrics: this.controller.getMetrics ? this.controller.getMetrics() : null
     });
     
@@ -100,7 +105,7 @@ class TemperatureControlService extends EventEmitter {
     return {
       peltier1: controlResult.peltier1,
       peltier2: controlResult.peltier2,
-      controller: 'neural',
+      controller: 'rbf-pid',
       metrics: controlResult
     };
   }
@@ -122,30 +127,32 @@ class TemperatureControlService extends EventEmitter {
    */
   getConfiguration() {
     return {
-      controller: 'neural',
+      controller: 'rbf-pid',
       enabled: this.isEnabled,
       lastUpdate: this.lastUpdate
     };
   }
   
   /**
-   * Get neural controller parameters
+   * Get RBF Adaptive PID controller parameters
    */
   getControllerParams() {
     if (!this.controller) return null;
     
     return {
       setpoint: this.controller.setpoint,
-      predictionHorizon: this.controller.predictionHorizon,
-      controlHorizon: this.controller.controlHorizon,
-      hiddenSize: this.controller.hiddenSize,
+      kp: this.controller.kp,
+      ki: this.controller.ki,
+      kd: this.controller.kd,
+      numCenters: this.controller.numCenters,
       learningRate: this.controller.learningRate,
-      modelConfidence: this.controller.modelConfidence
+      spread: this.controller.spread,
+      nonlinearGain: this.controller.nonlinearGain
     };
   }
   
   /**
-   * Update neural controller parameters
+   * Update RBF Adaptive PID controller parameters
    */
   updateControllerParams(params) {
     if (!this.controller) return false;
@@ -157,8 +164,8 @@ class TemperatureControlService extends EventEmitter {
       }
     });
     
-    console.log(`📝 Updated neural controller parameters:`, params);
-    this.emit('controllerParamsUpdated', { type: 'neural', params });
+    console.log(`📝 Updated RBF Adaptive PID controller parameters:`, params);
+    this.emit('controllerParamsUpdated', { type: 'rbf-pid', params });
     
     return true;
   }
@@ -198,13 +205,13 @@ class TemperatureControlService extends EventEmitter {
         stabilityRate,
         totalSamples: this.performanceHistory.length
       },
-      neural: {
+      rbfPid: {
         avgError,
         samples: this.performanceHistory.length,
         avgProcessingTime: recent.reduce((a, b) => a + b.processingTime, 0) / recent.length
       },
       current: {
-        controller: 'neural',
+        controller: 'rbf-pid',
         enabled: this.isEnabled,
         lastUpdate: this.lastUpdate
       }
@@ -212,29 +219,56 @@ class TemperatureControlService extends EventEmitter {
   }
   
   /**
-   * Export neural network model
+   * Export RBF network weights and parameters
    */
-  exportNeuralModel() {
-    if (this.controller && this.controller.exportModel) {
-      return this.controller.exportModel();
-    }
-    return null;
+  exportRBFModel() {
+    if (!this.controller) return null;
+    
+    return {
+      weights: this.controller.weights,
+      centers: this.controller.centers,
+      gains: { kp: this.controller.kp, ki: this.controller.ki, kd: this.controller.kd },
+      parameters: {
+        numCenters: this.controller.numCenters,
+        learningRate: this.controller.learningRate,
+        spread: this.controller.spread,
+        nonlinearGain: this.controller.nonlinearGain
+      }
+    };
   }
   
   /**
-   * Import neural network model
+   * Import RBF network weights and parameters
    */
-  importNeuralModel(model) {
-    if (this.controller && this.controller.importModel) {
-      this.controller.importModel(model);
-      console.log('✅ Neural model imported successfully');
+  importRBFModel(model) {
+    if (!this.controller || !model) return false;
+    
+    try {
+      if (model.weights) this.controller.weights = model.weights;
+      if (model.centers) this.controller.centers = model.centers;
+      if (model.gains) {
+        this.controller.kp = model.gains.kp;
+        this.controller.ki = model.gains.ki;
+        this.controller.kd = model.gains.kd;
+      }
+      if (model.parameters) {
+        Object.keys(model.parameters).forEach(key => {
+          if (this.controller.hasOwnProperty(key)) {
+            this.controller[key] = model.parameters[key];
+          }
+        });
+      }
+      
+      console.log('✅ RBF model imported successfully');
       return true;
+    } catch (error) {
+      console.error('❌ Failed to import RBF model:', error);
+      return false;
     }
-    return false;
   }
   
   /**
-   * Reset neural controller
+   * Reset RBF Adaptive PID controller
    */
   reset() {
     if (this.controller && this.controller.reset) {
@@ -244,7 +278,7 @@ class TemperatureControlService extends EventEmitter {
     this.performanceHistory = [];
     this.lastUpdate = null;
     
-    console.log('🔄 Neural controller reset');
+    console.log('🔄 RBF Adaptive PID controller reset');
     this.emit('controllersReset');
   }
 }

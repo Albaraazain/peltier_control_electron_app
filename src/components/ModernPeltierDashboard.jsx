@@ -31,9 +31,7 @@ import {
   Sliders,
   Cpu
 } from 'lucide-react'
-import { DualPeltierController } from '../utils/PIDController'
-import { SmartAdaptiveController } from '../utils/SmartAdaptiveController'
-import { StableController } from '../utils/StableController'
+// Neural ML Controller is now handled by the backend service
 import { safeToFixed } from '../lib/utils'
 
 // Register Chart.js plugins
@@ -51,7 +49,7 @@ ChartJS.register(
 
 const ModernPeltierDashboard = ({ onOpenSettings }) => {
   const chartRef = useRef(null)
-  const pidControllerRef = useRef(null)
+  // Neural controller is handled by backend service
   const [targetTemp, setTargetTemp] = useState(5)
   const [currentTemp, setCurrentTemp] = useState(22.4)
   const [temperatureHistory, setTemperatureHistory] = useState([])
@@ -71,39 +69,10 @@ const ModernPeltierDashboard = ({ onOpenSettings }) => {
   const maxDataPoints = 200
   const warningThreshold = 3.0
   
-  // Initialize controller based on selection
+  // RBF Adaptive PID controller is now handled entirely by the backend service
   useEffect(() => {
-    switch (controllerType) {
-      case 'stable':
-        pidControllerRef.current = new StableController({
-          setpoint: targetTemp,
-          tolerance: 0.5,
-          kp: 3.0,
-          ki: 0.1,
-          kd: 0.5
-        })
-        console.log('[Dashboard] Stable Controller initialized')
-        break
-      case 'smart':
-        pidControllerRef.current = new SmartAdaptiveController({
-          setpoint: targetTemp,
-          tolerance: 0.3
-        })
-        console.log('[Dashboard] Smart Adaptive Controller initialized')
-        break
-      case 'pid':
-        pidControllerRef.current = new DualPeltierController({
-          kp: pidParams?.kp || 5.0,
-          ki: pidParams?.ki || 1.2,
-          kd: pidParams?.kd || 0.5,
-          setpoint: targetTemp,
-          sampleTime: 1000,
-          cascadeThreshold: 30  // Use second Peltier earlier
-        })
-        console.log('[Dashboard] Traditional PID Controller initialized')
-        break
-    }
-  }, [controllerType, targetTemp, pidParams])
+    console.log('[Dashboard] RBF Adaptive PID Controller is active in backend service')
+  }, [targetTemp])
   
   // Load PID settings on mount
   useEffect(() => {
@@ -120,10 +89,7 @@ const ModernPeltierDashboard = ({ onOpenSettings }) => {
           setPidParams(validatedParams)
           console.log('🌍 Loaded PID settings:', validatedParams)
           // Reset PID controller with new logic
-          if (pidControllerRef.current) {
-            pidControllerRef.current.reset()
-            console.log('[Dashboard] PID controller reset with new cooling logic')
-          }
+          console.log('[Dashboard] RBF controller reset handled by backend')
           // Enable auto mode after settings are loaded
           console.log('[Dashboard] Enabling auto mode after PID settings loaded')
           setAutoMode(true)
@@ -274,75 +240,12 @@ const ModernPeltierDashboard = ({ onOpenSettings }) => {
 
   // Auto mode control with smart or traditional controller
   useEffect(() => {
-    if (autoMode && pidControllerRef.current) {
-      const tempError = targetTemp - currentTemp
-      console.log(`🎯 ${controllerType.charAt(0).toUpperCase() + controllerType.slice(1)} Controller Update: Current=${safeToFixed(currentTemp, 1)}°C, Target=${targetTemp}°C, Error=${safeToFixed(tempError, 1)}°C, NeedsCooling=${tempError < 0}`)
-      const controlResult = pidControllerRef.current.update(currentTemp)
-      
-      if (controlResult) {
-        if (controllerType === 'smart' || controllerType === 'stable') {
-          // Smart controller output
-          console.log(`📊 Smart Output: Total=${safeToFixed(controlResult.output, 1)}%, P1=${safeToFixed(controlResult.peltier1.dutyCycle, 1)}%, P2=${safeToFixed(controlResult.peltier2.dutyCycle, 1)}%`)
-          if (controlResult.oscillating) console.log('🌊 Oscillation detected - damping active')
-          if (controlResult.steadyState) console.log('✅ Steady state - maintaining temperature')
-          
-          // Update duty cycles for visual display
-          setPeltierDutyCycles({
-            1: Math.round(controlResult.peltier1.dutyCycle),
-            2: Math.round(controlResult.peltier2.dutyCycle)
-          })
-          
-          // Handle Peltier state changes
-          if (peltierStates[1] !== controlResult.peltier1.shouldBeOn) {
-            console.log(`⚡ Peltier 1 state change: ${controlResult.peltier1.shouldBeOn ? 'ON' : 'OFF'}`)
-            handlePeltierControl(1, controlResult.peltier1.shouldBeOn)
-          }
-          if (peltierStates[2] !== controlResult.peltier2.shouldBeOn) {
-            console.log(`⚡ Peltier 2 state change: ${controlResult.peltier2.shouldBeOn ? 'ON' : 'OFF'}`)
-            handlePeltierControl(2, controlResult.peltier2.shouldBeOn)
-          }
-        } else {
-          // Traditional PID controller output
-          console.log(`📊 PID Output: Total=${safeToFixed(controlResult.totalOutput, 1)}%, P1=${safeToFixed(controlResult.peltier1.dutyCycle, 1)}%, P2=${safeToFixed(controlResult.peltier2.dutyCycle, 1)}%`)
-          console.log(`🔄 PID Components: P=${safeToFixed(controlResult.pid.P, 2)}, I=${safeToFixed(controlResult.pid.I, 2)}, D=${safeToFixed(controlResult.pid.D, 2)}`)
-          
-          // Update duty cycles for visual display
-          setPeltierDutyCycles({
-            1: Math.round(controlResult.peltier1.dutyCycle),
-            2: Math.round(controlResult.peltier2.dutyCycle)
-          })
-          
-          // Only send commands to PLC when state changes to reduce communication
-          if (controlResult.peltier1.stateChanged) {
-            console.log(`⚡ Peltier 1 state change: ${controlResult.peltier1.shouldBeOn ? 'ON' : 'OFF'}`)
-            handlePeltierControl(1, controlResult.peltier1.shouldBeOn)
-          }
-          if (controlResult.peltier2.stateChanged) {
-            console.log(`⚡ Peltier 2 state change: ${controlResult.peltier2.shouldBeOn ? 'ON' : 'OFF'}`)
-            handlePeltierControl(2, controlResult.peltier2.shouldBeOn)
-          }
-        }
-        
-        // Update metrics
-        const metrics = pidControllerRef.current.getMetrics()
-        setPidMetrics(metrics)
-      }
+    if (autoMode) {
+      // RBF Adaptive PID controller handles all temperature processing in the backend
+      console.log(`🔧 RBF Adaptive PID: Current=${safeToFixed(currentTemp, 1)}°C, Target=${targetTemp}°C`)
+      // RBF controller automatically handles all Peltier control decisions
     }
-  }, [currentTemp, autoMode, controllerType, peltierStates])
-  
-  // Update PID setpoint when target temperature changes
-  useEffect(() => {
-    if (pidControllerRef.current) {
-      pidControllerRef.current.setSetpoint(targetTemp)
-    }
-  }, [targetTemp])
-  
-  // Update PID gains when parameters change (only for traditional PID)
-  useEffect(() => {
-    if (pidControllerRef.current && controllerType === 'pid') {
-      pidControllerRef.current.setPIDGains(pidParams.kp, pidParams.ki, pidParams.kd)
-    }
-  }, [pidParams, controllerType])
+  }, [currentTemp, autoMode, targetTemp])
 
   // Electron API integration
   useEffect(() => {
@@ -446,12 +349,11 @@ const ModernPeltierDashboard = ({ onOpenSettings }) => {
     console.log(`[Dashboard] Auto mode toggled: ${newAutoMode ? 'ON' : 'OFF'}`)
     setAutoMode(newAutoMode)
     
-    if (!newAutoMode && pidControllerRef.current) {
-      // Reset PID controller when switching to manual mode
-      pidControllerRef.current.reset()
+    if (!newAutoMode) {
+      // RBF controller is disabled via backend
       setPeltierDutyCycles({ 1: 0, 2: 0 })
     } else if (newAutoMode) {
-      console.log(`[Dashboard] PID Controller activated with target=${targetTemp}°C`)
+      console.log(`[Dashboard] RBF Adaptive PID Controller activated with target=${targetTemp}°C`)
     }
   }
 

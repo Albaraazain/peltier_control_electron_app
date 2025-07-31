@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   savePIDSettings: (pidParams) => ipcRenderer.invoke('pid:save-settings', pidParams),
   getPIDSettings: () => ipcRenderer.invoke('pid:get-settings'),
   
+  // RBF Adaptive PID Controller
+  getRBFStatus: () => ipcRenderer.invoke('rbf:get-status'),
+  setRBFEnabled: (enabled) => ipcRenderer.invoke('rbf:set-enabled', enabled),
+  exportRBFModel: () => ipcRenderer.invoke('rbf:export-model'),
+  importRBFModel: (model) => ipcRenderer.invoke('rbf:import-model', model),
+  
   // System
   getSystemInfo: () => ipcRenderer.invoke('system:info'),
   
@@ -34,5 +40,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPeltierStatusChange: (callback) => {
     ipcRenderer.on('peltier:status-change', callback);
     return () => ipcRenderer.removeListener('peltier:status-change', callback);
+  },
+  
+  onControlDecision: (callback) => {
+    ipcRenderer.on('controlDecision', callback);
+    return () => ipcRenderer.removeListener('controlDecision', callback);
   }
 });

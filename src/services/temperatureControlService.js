@@ -212,11 +212,11 @@ class TemperatureControlService extends EventEmitter {
   }
   
   /**
-   * Export neural network model (if using neural controller)
+   * Export neural network model
    */
   exportNeuralModel() {
-    if (this.controllers.neural && this.controllers.neural.exportModel) {
-      return this.controllers.neural.exportModel();
+    if (this.controller && this.controller.exportModel) {
+      return this.controller.exportModel();
     }
     return null;
   }
@@ -225,8 +225,8 @@ class TemperatureControlService extends EventEmitter {
    * Import neural network model
    */
   importNeuralModel(model) {
-    if (this.controllers.neural && this.controllers.neural.importModel) {
-      this.controllers.neural.importModel(model);
+    if (this.controller && this.controller.importModel) {
+      this.controller.importModel(model);
       console.log('✅ Neural model imported successfully');
       return true;
     }
@@ -234,19 +234,17 @@ class TemperatureControlService extends EventEmitter {
   }
   
   /**
-   * Reset all controllers
+   * Reset neural controller
    */
   reset() {
-    Object.values(this.controllers).forEach(controller => {
-      if (controller && controller.reset) {
-        controller.reset();
-      }
-    });
+    if (this.controller && this.controller.reset) {
+      this.controller.reset();
+    }
     
     this.performanceHistory = [];
     this.lastUpdate = null;
     
-    console.log('🔄 All controllers reset');
+    console.log('🔄 Neural controller reset');
     this.emit('controllersReset');
   }
 }

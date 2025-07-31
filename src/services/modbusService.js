@@ -35,9 +35,22 @@ class ModbusService extends EventEmitter {
     // Initialize temperature control service
     this.controlService = new TemperatureControlService();
     this.controlService.initializeControllers({ setpoint: 5.0 });
+    this.controlService.setEnabled(true); // Enable neural control by default
     
     // Forward control service events
-    this.controlService.on('controlDecision', (data) => {
+    this.controlService.on('controlDecision', async (data) => {
+      // Apply control decisions to hardware
+      try {
+        if (data.peltier1 !== this.actualPeltierStates[1]) {
+          await this.writePeltierControl(1, data.peltier1);
+        }
+        if (data.peltier2 !== this.actualPeltierStates[2]) {
+          await this.writePeltierControl(2, data.peltier2);
+        }
+      } catch (error) {
+        console.error('Error applying neural control decisions:', error);
+      }
+      
       this.emit('controlDecision', data);
     });
     
@@ -336,7 +349,7 @@ class ModbusService extends EventEmitter {
     }
   }
 
-  startPolling(interval = 1000) {  // 1 second for PID control
+  startPolling(interval = 1000) {  // 1 second for neural control
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
     }
@@ -345,6 +358,11 @@ class ModbusService extends EventEmitter {
       try {
         const tempReading = await this.readTemperature();
         this.emit('temperatureUpdate', tempReading);
+        
+        // Process temperature through neural controller
+        if (this.controlService) {
+          this.controlService.processTemperature(tempReading.temperature);
+        }
         
         // Don't read Peltier statuses - causes timeouts
         // Status is tracked from write commands
